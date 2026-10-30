@@ -1,0 +1,104 @@
+[
+  {
+    "file": "valid/exemple.toml",
+    "expected": "accept",
+    "case": "exemple",
+    "reason": null
+  },
+  {
+    "file": "valid/noeud_sans_serie.toml",
+    "expected": "accept",
+    "case": "nœud sans série",
+    "reason": null
+  },
+  {
+    "file": "invalid/id_en_double.toml",
+    "expected": "reject",
+    "case": "id en double",
+    "reason": "id en double : ['env-01']"
+  },
+  {
+    "file": "invalid/adresse_en_double.toml",
+    "expected": "reject",
+    "case": "adresse en double",
+    "reason": "slave en double : [1]"
+  },
+  {
+    "file": "invalid/adresse_0_broadcast.toml",
+    "expected": "reject",
+    "case": "adresse 0 (broadcast)",
+    "reason": "0 is less than the minimum of 1"
+  },
+  {
+    "file": "invalid/adresse_248.toml",
+    "expected": "reject",
+    "case": "adresse 248",
+    "reason": "248 is greater than the maximum of 247"
+  },
+  {
+    "file": "invalid/serie_0.toml",
+    "expected": "reject",
+    "case": "série 0",
+    "reason": "0 is less than the minimum of 1"
+  },
+  {
+    "file": "invalid/serie_en_double.toml",
+    "expected": "reject",
+    "case": "série en double",
+    "reason": "serial en double : [4096]"
+  },
+  {
+    "file": "invalid/min_max_surcharge_d_un_seul_cote.toml",
+    "expected": "reject",
+    "case": "min >= max (surcharge d'un seul côté)",
+    "reason": "env-01 : temp_min_c (9.0) doit être < temp_max_c (8.0) effectifs"
+  },
+  {
+    "file": "invalid/faute_de_frappe_sur_une_cle.toml",
+    "expected": "reject",
+    "case": "faute de frappe sur une clé",
+    "reason": "Additional properties are not allowed ('periode_s' was unexpected)"
+  },
+  {
+    "file": "invalid/periode_0.toml",
+    "expected": "reject",
+    "case": "période 0",
+    "reason": "0 is less than the minimum of 1"
+  },
+  {
+    "file": "invalid/id_en_majuscules.toml",
+    "expected": "reject",
+    "case": "id en majuscules",
+    "reason": "'ENV-01' does not match '^[a-z0-9]+(-[a-z0-9]+)*$'"
+  },
+  {
+    "file": "invalid/zone_absente.toml",
+    "expected": "reject",
+    "case": "zone absente",
+    "reason": "'zone' is a required property"
+  },
+  {
+    "file": "invalid/parite_inconnue.toml",
+    "expected": "reject",
+    "case": "parité inconnue",
+    "reason": "'mark' is not one of ['none', 'even', 'odd']"
+  },
+  {
+    "file": "invalid/schema_2.toml",
+    "expected": "reject",
+    "case": "schema 2",
+    "reason": "1 was expected"
+  },
+  {
+    "file": "invalid/aucun_noeud.toml",
+    "expected": "reject",
+    "case": "aucun nœud",
+    "reason": "[] should be non-empty"
+  },
+  {
+    "file": "invalid/pir_en_double.toml",
+    "expected": "reject",
+    "case": "pir en double",
+    "reason": "pir en double"
+  }
+]

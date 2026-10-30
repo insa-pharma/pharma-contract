@@ -1,0 +1,38 @@
+# exemple
+# attendu : accepté
+
+schema = 1
+
+[site]
+id = "wh01"
+
+[mqtt]
+host = "mosquitto"
+port = 1883
+
+[bus]
+device = "/dev/ttyUSB0"
+baud = 9600
+parity = "none"
+timeout_ms = 300
+retries = 1
+
+[defaults]
+period_s = 10
+temp_min_c = 2.0
+temp_max_c = 8.0
+
+[[node]]
+id = "env-01"
+slave = 1
+zone = "salle-froide-a"
+serial = 4096
+
+[[node]]
+id = "env-02"
+slave = 2
+zone = "quai-reception"
+serial = 4097
+temp_min_c = 15.0
+temp_max_c = 25.0
+pir = "pir-01"
