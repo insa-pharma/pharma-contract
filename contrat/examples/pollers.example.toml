@@ -1,0 +1,40 @@
+# Configuration du poller Modbus — EXEMPLE (versionné avec le programme).
+# Le fichier réel d'un site vit dans pharma-infra (voir D34). Aucun secret ici :
+# identifiants MQTT et certificats viennent de variables d'environnement ou de fichiers hors dépôt.
+# Format : contrat/schemas/pollers.schema.json (types, plages) + règles de cohérence (test_pollers.py).
+
+schema = 1                       # version du format
+
+[site]
+id = "wh01"                      # champ `site` de l'enveloppe
+
+[mqtt]
+host = "mosquitto"
+port = 1883                      # 8883 en version durcie
+
+[bus]                            # un seul bus RS485 par poller
+device = "/dev/ttyUSB0"
+baud = 9600
+parity = "none"                  # 8N1, voir CONTRAT.md §1
+timeout_ms = 300                 # attente avant de déclarer un nœud muet
+retries = 1
+
+[defaults]                       # hérités par chaque nœud, sauf surcharge
+period_s = 10
+temp_min_c = 2.0
+temp_max_c = 8.0
+
+[[node]]
+id = "env-01"                    # src.id stable
+slave = 1                        # adresse d'esclave Modbus
+zone = "salle-froide-a"          # emplacement métier (D31)
+serial = 4096                    # numéro de série attendu (D32), facultatif
+
+[[node]]
+id = "env-02"
+slave = 2
+zone = "quai-reception"
+serial = 4097
+temp_min_c = 15.0                # surcharge : salle non réfrigérée
+temp_max_c = 25.0
+pir = "pir-01"                   # entrée discrète FC02 adresse 0 → src.id du capteur de mouvement

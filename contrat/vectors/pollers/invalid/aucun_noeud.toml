@@ -1,0 +1,24 @@
+# aucun nœud
+# attendu : rejeté — [] should be non-empty
+
+schema = 1
+node = []
+
+[site]
+id = "wh01"
+
+[mqtt]
+host = "mosquitto"
+port = 1883
+
+[bus]
+device = "/dev/ttyUSB0"
+baud = 9600
+parity = "none"
+timeout_ms = 300
+retries = 1
+
+[defaults]
+period_s = 10
+temp_min_c = 2.0
+temp_max_c = 8.0
