@@ -38,7 +38,7 @@ Démo, rapport, soutenance. Fin du projet mi-janvier, fin de semestre le vendred
 4. Le camion remonte ses mesures au fil de l'eau ; trajet GPS et courbe de température.
 5. Badge valide, badge inconnu : événements d'accès.
 6. Mouvement hors horaires : alarme et enregistrement vidéo.
-7. Un agent consulte la vidéo à distance, de façon authentifiée.
+7. Un agent consulte la vidéo depuis le réseau du personnel (VLAN 70), de façon authentifiée.
 8. Traçabilité : qui est entré, quand, et la température du camion pendant son trajet.
 9. Trois attaques sur la version vulnérable (faux message MQTT, rejeu LoRaWAN, clonage de badge ou écriture Modbus).
 10. Mêmes attaques sur la version durcie : bloquées, avec alertes pare-feu, IDS et SIEM.
@@ -53,32 +53,105 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
 ## 2. Architecture cible
 
 ```
- CLOUD / machine de l'école
- ┌───────────────────────────────────────────┐
- │ ChirpStack · lora-ingest · bus central    │
- │ ThingsBoard CE    Wazuh manager           │
- └──────────────────▲────────────────────────┘
-                    │ tailnet (Tailscale), connexions sortantes
- ENTREPÔT wh01      │
- ┌──────────────────┴───────────────────────────────────────────┐
- │ RPi3 : routeur · point d'accès WiFi · pare-feu nftables       │
- └──────┬─────────────────────────────────────┬──────────────────┘
-        │ Ethernet (LAN)                      │ WiFi (sous-réseau IoT)
- ┌──────┴────────────── RPi5 ───────────────┐ └─ ESP32-CAM  ◄─ le RPi5 tire le flux
- │ Mosquitto (bus interne)                  │
- │ modbus-poller · access · recorder        │
- │ tb-bridge · forwarder LoRa (HAT)         │
- │ Suricata · agent Wazuh · chrony          │
- └──┬──────────────┬───────────────┬────────┘
-    │ USB-RS485    │ SPI + UART    │ USB
-    │ Modbus RTU   │ HAT Dragino   │ lecteur de cartes ◄─ carte JavaCard
- Arduino+BME280    │ (LoRa + GPS)
- (+PIR)            ┊ radio LoRaWAN 868 MHz, ABP, un seul canal
- MOBILITÉ          ┊
- ┌─────────────────┴────┐
- │ ESP32 LoRa-GPS camion │  tampon en flash, envoi au fil de l'eau
- └───────────────────────┘
+ SERVEUR — PC dédié, VLAN 20 du site (D06, D37)
+ ┌──────────────────────────────────────────────────────────────┐
+ │ ChirpStack ─► lora-ingest ─► bus central ─► tb-bridge ─┐     │
+ │                                                        ▼     │
+ │ Wazuh manager                            ThingsBoard CE      │
+ └──────▲───────────────────────────────────────────▲───────────┘
+        │ paquets radio relayés                     │ depuis le tb-bridge de l'entrepôt
+        │ (Semtech UDP, VLAN 60 → VLAN 20)          │ (VLAN 60 → VLAN 20, jamais l'inverse)
+        │
+ ═══ PLAN LoRaWAN : réseau partagé ═══════════════════════════════════
+ ┌──────┴──────────────────────────────┐
+ │ passerelles LoRaWAN réparties       │
+ │ (forwarder seul, sans ChirpStack)   │
+ └──────▲──────────────────────────────┘
+        ┊ radio 868 MHz, ABP, un seul canal
+ ┌──────┴──────────────────────────────┐
+ │ ESP32 LoRa-GPS des camions (1..n)   │
+ │ envoi au fil de l'eau, tampon flash │
+ └─────────────────────────────────────┘
+ POC : une seule passerelle, le HAT Dragino monté sur le RPi5 de
+       l'entrepôt, dans son propre conteneur, sans lien avec son bus.
+
+ ═══ PLAN ENTREPÔT wh01 : passerelle locale ══════════════════════════
+                                                    │ vers ThingsBoard (voir plus haut)
+ ┌──────────────────────────────────────────────────┴──────┐
+ │ RPi3 : routeur · point d'accès WiFi · pare-feu nftables │
+ └──────┬─────────────────────────────────────┬────────────┘
+        │ Ethernet                            │ WiFi (sous-réseau IoT)
+ ┌──────┴─── RPi5 : passerelle locale ────┐   └─ ESP32-CAM ◄─ le RPi5 tire le flux
+ │ Mosquitto (bus de l'entrepôt)          │
+ │ modbus-poller · access · recorder      │
+ │ tb-bridge · Suricata · agent Wazuh     │
+ │ Modbus TCP · OPC UA (extensions, D03)  │
+ └──┬─────────────────────────┬───────────┘
+    │ USB-RS485, Modbus RTU   │ USB
+ Arduino(s) + BME280 (+PIR)   lecteur ◄─ carte JavaCard
+ plusieurs nœuds sur le bus (D29)
 ```
+
+### Vue réseau du site (D37)
+
+Un seul site pour le POC (`wh01`). Un switch administrable porte tous les VLAN ; le RPi3 route entre eux et filtre (routeur « sur un bâton », trunk 802.1Q). Le PC serveur est branché sur ce switch, dans le VLAN 20.
+
+```
+                              internet (réseau de l'école)
+                              │ WAN : 2e interface ou VLAN dédié (à décider)
+ ┌────────────────────────────┴─────────────────────────────┐
+ │ RPi3 : routeur inter-VLAN · pare-feu nftables · WiFi     │ ┄┄ WiFi ┄┄► ESP32-CAM (VLAN 40)
+ └────────────────────────────┬─────────────────────────────┘
+                              │ trunk 802.1Q (tous les VLAN)
+ ┌────────────────────────────┴─────────────────────────────┐
+ │ switch administrable : un port d'accès par équipement,   │
+ │ ports inutilisés en VLAN 999 (parking)                   │
+ └────┬──────────────────────┬───────────────────────────┬──┘
+      │ VLAN 20              │ VLAN 60                   │ VLAN 10
+ ┌────┴────────────────┐ ┌───┴────────────────────────┐  poste d'administration
+ │ PC serveur          │ │ RPi5 : passerelle locale   │
+ │ ThingsBoard CE      │ │ Mosquitto · modbus-poller  │
+ │ ChirpStack          │ │ access · recorder          │
+ │ lora-ingest         │ │ tb-bridge · Suricata       │
+ │ Wazuh manager       │ │ agent Wazuh                │
+ └─────────────────────┘ │ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+                         │ passerelle LoRa (HAT,      │
+                         │ conteneur à part)          │
+                         └────┬────────┬─────────┬────┘
+                              │ RS485  │ USB     ┊ radio 868 MHz
+                          Arduino(s)  lecteur  ESP32 des camions
+                                      JavaCard
+
+ VLAN 30 OT-CAPTEURS, 50 BADGE : réservés, aucun équipement IP aujourd'hui
+ VLAN 70 WIFI-STAFF : consultation de ThingsBoard (point d'accès à préciser)
+```
+
+| VLAN | Nom | `wh01` (site 1) | `wh02` (site 2, futur, D38) | Équipements aujourd'hui |
+|---|---|---|---|---|
+| 10 | MGMT | 10.1.10.0/24 | 10.2.10.0/24 | poste d'administration ; interfaces d'administration du RPi3 et du switch |
+| 20 | SERVEURS | 10.1.20.0/24 | — (le site 1 sert de siège) | PC serveur : ThingsBoard, ChirpStack, `lora-ingest`, bus central, Wazuh |
+| 30 | OT-CAPTEURS | 10.1.30.0/24 | 10.2.30.0/24 | aucun (les Arduino sont en RS485) ; réservé à Modbus TCP et OPC UA (D03) |
+| 40 | CAMERAS | 10.1.40.0/24 | 10.2.40.0/24 | ESP32-CAM (WiFi) |
+| 50 | BADGE | 10.1.50.0/24 | 10.2.50.0/24 | aucun (lecteur en USB sur le RPi5) ; réservé à un lecteur en réseau |
+| 60 | PASSERELLES | 10.1.60.0/24 | 10.2.60.0/24 | RPi5 (passerelle locale et passerelle LoRa) |
+| 70 | WIFI-STAFF | 10.1.70.0/24 | 10.2.70.0/24 | postes du personnel (consultation de ThingsBoard) |
+| 999 | PARKING | pas de sous-réseau | pas de sous-réseau | ports inutilisés du switch |
+
+**Matrice de flux** (proposée, à valider par la personne WAN ; ports marqués **[à vérifier]** : O25). Tout flux absent est refusé et journalisé. Le RPi3 est à états : les réponses aux connexions autorisées passent.
+
+| Source | Destination | Ports | Pourquoi |
+|---|---|---|---|
+| 60 PASSERELLES | 20 SERVEURS | MQTT 1883 (vulnérable) / 8883 (durcie) | `tb-bridge` → ThingsBoard |
+| 60 PASSERELLES | 20 SERVEURS | UDP 1700 **[à vérifier]** | forwarder LoRa → ChirpStack (Gateway Bridge) |
+| 60 PASSERELLES | 20 SERVEURS | TCP 1514–1515 **[à vérifier]** | agent Wazuh → serveur Wazuh |
+| 60 PASSERELLES | 40 CAMERAS | HTTP 80, 81 | le RPi5 tire le flux vidéo (D10) |
+| 60 PASSERELLES | 30 OT-CAPTEURS | TCP 502, 4840 | Modbus TCP, OPC UA (extensions D03) |
+| 10 MGMT | tous | SSH 22, interfaces web | administration |
+| 70 WIFI-STAFF | 20 SERVEURS | HTTPS | consultation de ThingsBoard (scénario 7) |
+| 20 SERVEURS, 70 WIFI-STAFF | internet | HTTP, HTTPS | mises à jour, navigation |
+| tous | RPi3 | DHCP, DNS, NTP | services de base |
+
+Aucun VLAN n'ouvre de connexion vers le 60 ni vers le 10 ; les caméras n'ouvrent de connexion vers personne. **Version vulnérable :** même câblage et mêmes VLAN, mais règles inter-VLAN tout ouvertes ; **version durcie :** cette matrice. La segmentation devient une comparaison avant/après pour la démo, sans recâblage.
 
 ### Composants et propriétaires
 
@@ -91,7 +164,7 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
 | Passerelle d'entrepôt (RPi5) | adaptateurs, bus, pont ThingsBoard | RPi5 |
 | Passerelle LoRa (HAT + forwarder, sur le RPi5) | paquets radio → ChirpStack | RPi5 |
 | Serveur réseau LoRaWAN (ChirpStack, `lora-ingest`, bus central) | uplinks → enveloppe | serveur **[à confirmer]** |
-| Périmètre réseau (RPi3) | pare-feu, accès | WAN |
+| Périmètre réseau (RPi3, switch administrable) | VLAN, pare-feu inter-VLAN, matrice de flux | WAN |
 | Plateforme cloud | ThingsBoard | serveur |
 | SIEM, IDS, anomalies (Blue) | alertes, règles | WAN + serveur (proposé) |
 | Attaques (Red) | scénarios et preuves | Arduino + JavaCard (proposé) |
@@ -104,7 +177,7 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
 3. **Simulation d'abord.** Chaque étape marche en profil `sim` avant le profil `hw`.
 4. **Local d'abord.** L'entrepôt fonctionne sans internet : décision d'accès locale, file persistante vers ThingsBoard. Cela vaut pour le plan entrepôt ; le plan LoRaWAN dépend, par nature, du serveur réseau central (D36).
 5. **Deux versions, un contrat.** Vulnérable et durcie partagent les mêmes interfaces. Seule la configuration de sécurité change.
-6. **Aucun secret dans un dépôt.** Clés LoRaWAN, jetons ThingsBoard, mots de passe WiFi, clés Tailscale vont dans des fichiers `.env` non versionnés.
+6. **Aucun secret dans un dépôt.** Clés LoRaWAN, jetons ThingsBoard, mots de passe WiFi, clés VPN vont dans des fichiers `.env` non versionnés.
 7. **Une direction de dépendance.** Tous les dépôts dépendent du contrat (version étiquetée), jamais les uns des autres. La seule frontière entre composants est le contrat plus une image de conteneur.
 8. **Types générés depuis les schémas.** Le contrat publie des schémas JSON et des vecteurs de test, pas de bibliothèque dans un langage donné. Chaque dépôt génère ses propres types : un changement du contrat fait échouer la compilation au lieu de dériver en silence.
 
@@ -117,7 +190,7 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
 | `pharma-firmware-warehouse` | nœud capteurs (Arduino, puis PSoC) et ESP32-CAM | C/C++ (Arduino / PlatformIO) | Arduino, mobilité n°2 |
 | `pharma-firmware-mobility` | ESP32 du camion, avec la bibliothèque d'encodage de trame | C++ (PlatformIO) | mobilité ×2 |
 | `pharma-javacard` | applet, client APDU de référence, service `access` (livré en image de conteneur) | Java, Rust ou autre : voir O14 | JavaCard |
-| `pharma-infra` | réseau RPi3, règles d'accès Tailscale, déploiement, configuration ThingsBoard, règles Suricata et Wazuh | Ansible, YAML | WAN, serveur |
+| `pharma-infra` | réseau RPi3 et switch (VLAN, matrice de flux), déploiement, configuration ThingsBoard, règles Suricata et Wazuh | Ansible, YAML | WAN, serveur |
 | `pharma-security` | scénarios d'attaque (Red), règles de détection (Blue), preuves | scripts | Arduino, JavaCard (Red) ; WAN, serveur (Blue) |
 
 Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour fournir des fichiers par défaut, donc rien de sensible dedans.
@@ -138,14 +211,14 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | D01 | Un dépôt `pharma-contract` réunit contrat, mocks, tests et intégration. Les autres dépôts épinglent une version étiquetée | Éviter la dérive entre spec et simulation | Monorepo (refusé par l'équipe) ; contrat et intégration séparés | décidé |
 | D02 | Enveloppe JSON commune et bus MQTT interne (Mosquitto sur le RPi5) | Découple les protocoles du cloud, point de capture pour l'IDS et les tests | Chaque service parle directement à ThingsBoard | proposé |
 | D03 | Protocoles : **Modbus RTU et LoRaWAN obligatoires** ; Modbus TCP puis OPC UA secondaires | Cahier des charges minimal tenable ; Modbus TCP (vulnérable) puis OPC UA (sécurisé) racontent un durcissement | Tous les protocoles d'emblée (risque de ne pas finir) | décidé |
-| D04 | LoRaWAN en ABP, un canal et un SF fixés, avec le HAT Dragino (SX1276) ; ChirpStack sur la machine de l'école (D35) | Matériel disponible ; ce HAT n'est pas une vraie passerelle multi-canaux et n'émet probablement pas de réponse de jonction | Concentrateur SX1302/1303 (non disponible) | proposé |
+| D04 | LoRaWAN en ABP, un canal et un SF fixés, avec le HAT Dragino (SX1276) ; ChirpStack sur le PC serveur (D35, D37) | Matériel disponible ; ce HAT n'est pas une vraie passerelle multi-canaux et n'émet probablement pas de réponse de jonction | Concentrateur SX1302/1303 (non disponible) | proposé |
 | D05 | Camion : enregistrement local en flash (tampon) ; envoi au fil de l'eau, la portée de la passerelle étant supposée acquise (D36, remplace l'envoi différé au retour à portée) | Pas de passerelle ni de 4G dans le camion ; l'historique complet suffit à la traçabilité | Passerelle embarquée avec clé 4G ; réseau public | décidé |
-| D06 | ThingsBoard CE auto-hébergé sur la machine de l'école (32 Go, Debian) | Déjà en place | ThingsBoard Cloud (payant, données chez un tiers) | décidé |
+| D06 | ThingsBoard CE auto-hébergé sur un **PC serveur dédié**, branché au switch de l'entrepôt dans le VLAN 20 (D37) | Machine dédiée au projet, au laboratoire, dans le réseau segmenté | ThingsBoard Cloud (payant, données chez un tiers) ; machine partagée du département | décidé |
 | D07 | Contrôle d'accès : décision en local, journal envoyé au cloud | L'entrepôt doit s'ouvrir sans internet | Décision côté cloud | proposé |
 | D08 | Alarmes de température calculées une seule fois, dans ThingsBoard (seuils 2–8 °C en attributs) | Source unique, pas de doublon | Alarmes sur la passerelle | proposé |
 | D09 | Capteurs PIR et pression **simulés** tant que le matériel n'est pas obtenu ; signalé en démo et dans le rapport | Matériel à demander au retour à l'école | Attendre | décidé |
-| D10 | Vidéo : le RPi5 tire le flux de la caméra ; une page de visualisation sur le RPi5, accessible seulement sur le tailnet, intégrée dans ThingsBoard. Tests automatiques vidéo : secondaires | Aucune exposition de la caméra, accès par identité ; réutilisable par une application mobile | VPN seul ; exposition publique | décidé sur le principe, à tester |
-| D11 | Tailscale pour l'administration et le transport, règles d'accès versionnées, laboratoire isolé | Simplicité de déploiement | WireGuard manuel | décidé sur le principe ; variante (SaaS ou Headscale) ouverte |
+| D10 | Vidéo : le RPi5 tire le flux de la caméra ; une page de visualisation sur le RPi5, accessible seulement depuis les VLAN d'administration et du personnel (D37), intégrée dans ThingsBoard. Tests automatiques vidéo : secondaires | Aucune exposition de la caméra, accès par identité ; réutilisable par une application mobile | VPN seul ; exposition publique | décidé sur le principe, à tester |
+| D11 | ~~Tailscale pour l'administration et le transport~~ → **remplacée par D38** (pas de VPN pour le POC, WireGuard pour un futur second site) | — | — | abandonnée |
 | D12 | La version vulnérable ne tourne **jamais** sur l'instance partagée ou accessible hors du laboratoire | Mots de passe par défaut et services ouverts voulus ; risque réel pour le réseau de l'école | Héberger la version vulnérable sur la machine de l'école | proposé |
 | D13 | Red/Blue : Blue = WAN + serveur ; Red = Arduino + JavaCard | Séparer attaque et défense | Même personne pour les deux | à discuter |
 | D14 | Organisation GitHub `insa-pharma`, dépôts privés, sept dépôts (voir §2). Le firmware est en deux dépôts (entrepôt, camion) | Autonomie des membres ; le firmware de l'entrepôt et celui du camion n'ont pas de code commun | Monorepo ; un seul dépôt firmware | décidé |
@@ -168,9 +241,11 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | D31 | **Identité et emplacement séparés.** L'Arduino ne porte qu'un identifiant technique (adresse d'esclave Modbus, éventuellement un numéro de série, O20). `pollers.toml` fait la « traduction métier » : adresse → `src.id` stable (`env-01`) + `zone` (emplacement, par exemple `salle-froide-a`). La zone est publiée dans le message `status` du nœud (champ facultatif, schéma mis à jour) et devient un attribut ThingsBoard. Elle n'apparaît jamais dans la télémétrie | Déplacer un capteur ne change ni son identifiant ni son historique ; le contrat de télémétrie ne change pas ; le bus ne transporte aucun nom métier | Zone codée dans `src.id` (`env-salle-froide-a`) | décidé |
 | D32 | **Numéro de série dans les registres d'entrée 7–8** (uint32, unique par carte, `0` = non programmé), ajout compatible v1.x. Le poller lit désormais les registres 0 à 8 et, si `pollers.toml` indique un numéro attendu, compare : écart ou `0` → pas de télémétrie pour ce nœud, alarme `identity_mismatch` (critique), champ `serial` dans le `status` | Détecte une carte échangée, une mauvaise adresse ou un appareil de remplacement ; matière pour la partie Blue. **Limite assumée :** ce n'est pas une authentification, un attaquant peut annoncer le même numéro | Adresse d'esclave seule | décidé (à faire accepter par la personne Arduino) |
 | D33 | **Format de configuration du poller : `pollers.toml`** (TOML, version `schema = 1`). Un seul `[bus]` par poller (une deuxième instance si un deuxième adaptateur apparaît), `[defaults]` hérités par chaque `[[node]]`, `serial` facultatif (absent = pas de vérification d'identité, avertissement dans le journal), `config_drift` toujours actif, pas de rechargement à chaud, aucun secret dans le fichier. Le **schéma JSON** (`contrat/schemas/pollers.schema.json`) couvre types, plages et motifs ; les règles de cohérence (unicité de `id`, `slave`, `serial`, `pir` ; `temp_min_c` < `temp_max_c` effectifs) sont dans `test_pollers.py`, que le poller Rust doit reproduire sur les mêmes cas invalides | TOML : commentaires, types explicites (entier ≠ flottant ≠ texte, pas d'ambiguïté `no`/`off`), grammaire courte, outillage natif en Rust (`serde` + crate `toml`) ; la configuration est peu imbriquée, donc `[[node]]` suffit. Le fichier est lu par deux consommateurs (poller, script de `pharma-infra`) : c'est une interface, donc un schéma | YAML (commentaires, mais typage implicite piégeux et plusieurs versions de la spécification ; le crate `serde_yaml` a, à ma connaissance, été archivé par son auteur), JSON (pas de commentaires, verbeux pour de la configuration écrite à la main) | décidé |
-| D34 | **Trois classes de fichiers.** (1) *Liés au programme*, versionnés dans le dépôt du programme : schéma, fichier exemple, valeurs par défaut, `.env.example`. (2) *Configuration de site*, sans secret, propre à un déploiement : `pollers.toml` réel, `compose` de déploiement (versions d'images figées). Le `compose` de développement et de simulation (`sim`, `hw`) reste dans `pharma-gateway`, avec les programmes. (3) *Secrets et fichiers d'exécution*, **jamais dans un dépôt** : mots de passe MQTT, jeton ThingsBoard, clés LoRaWAN, clé d'authentification Tailscale, certificats, `.env` ; ils sont créés sur la machine (ou via un coffre) et seul le `.env.example` est versionné. La classe (2) est versionnée dans `pharma-infra` et déployée vers `/etc/pharma/` | Principe 6 de ce document, étendu : un secret ne se relit pas dans l'historique Git ; une configuration sans secret gagne à être relue et restaurable (les seuils sont un choix métier qui se révise) | Tout hors dépôt (perd la relecture et le retour arrière, et le script ThingsBoard n'aurait plus de source) décidé. Règle pour `pollers.toml` : `pollers.example.toml` dans `pharma-gateway` ; en développement, une copie locale `pollers.toml` ignorée par Git ; le fichier réel d'un site dans `pharma-infra` quand on déploie vraiment. Ansible n'est pas requis avant l'étape 6 |
-| D35 | **ChirpStack sur la machine de l'école**, pas sur le RPi5. Le RPi5 n'est qu'une **passerelle LoRaWAN** (HAT + forwarder, déclarée par l'EUI du HAT) qui relaie les paquets à ChirpStack ; `lora-ingest` est déployé à côté de ChirpStack | Le professeur décrit LoRaWAN comme un réseau partagé de passerelles dispersées avec un serveur réseau central ; le POC n'a qu'une passerelle et suppose le camion toujours à sa portée. ChirpStack, PostgreSQL et Redis quittent le RPi5 (4 Go, O7) | ChirpStack sur le RPi5 (plus simple, mais contraire au modèle réel) | décidé |
+| D34 | **Trois classes de fichiers.** (1) *Liés au programme*, versionnés dans le dépôt du programme : schéma, fichier exemple, valeurs par défaut, `.env.example`. (2) *Configuration de site*, sans secret, propre à un déploiement : `pollers.toml` réel, `compose` de déploiement (versions d'images figées). Le `compose` de développement et de simulation (`sim`, `hw`) reste dans `pharma-gateway`, avec les programmes. (3) *Secrets et fichiers d'exécution*, **jamais dans un dépôt** : mots de passe MQTT, jeton ThingsBoard, clés LoRaWAN, clés VPN (WireGuard, le jour où il y aura deux sites), certificats, `.env` ; ils sont créés sur la machine (ou via un coffre) et seul le `.env.example` est versionné. La classe (2) est versionnée dans `pharma-infra` et déployée vers `/etc/pharma/` | Principe 6 de ce document, étendu : un secret ne se relit pas dans l'historique Git ; une configuration sans secret gagne à être relue et restaurable (les seuils sont un choix métier qui se révise) | Tout hors dépôt (perd la relecture et le retour arrière, et le script ThingsBoard n'aurait plus de source) décidé. Règle pour `pollers.toml` : `pollers.example.toml` dans `pharma-gateway` ; en développement, une copie locale `pollers.toml` ignorée par Git ; le fichier réel d'un site dans `pharma-infra` quand on déploie vraiment. Ansible n'est pas requis avant l'étape 6 |
+| D35 | **ChirpStack sur le PC serveur** (VLAN 20, D37), pas sur le RPi5. Le RPi5 n'est qu'une **passerelle LoRaWAN** (HAT + forwarder, déclarée par l'EUI du HAT) qui relaie les paquets à ChirpStack ; `lora-ingest` est déployé à côté de ChirpStack | Le professeur décrit LoRaWAN comme un réseau partagé de passerelles dispersées avec un serveur réseau central ; le POC n'a qu'une passerelle et suppose le camion toujours à sa portée. ChirpStack, PostgreSQL et Redis quittent le RPi5 (4 Go, O7) | ChirpStack sur le RPi5 (plus simple, mais contraire au modèle réel) | décidé |
 | D36 | **Deux plans séparés** : le plan entrepôt (Modbus, TCP, OPC UA, accès, vidéo, bus MQTT local, `tb-bridge`) et le plan LoRaWAN (passerelle LoRa, ChirpStack, `lora-ingest`, bus central, seconde instance de `tb-bridge`). Ils ne se rejoignent que dans ThingsBoard et dans l'enveloppe. Conséquences : le camion envoie **au fil de l'eau** (la flash reste un tampon, D05 amendée) ; son `site` est son **site d'attache** ; « local d'abord » ne vaut que pour le plan entrepôt ; le code de `lora-ingest` reste dans `pharma-gateway` mais se déploie sur le serveur | Les deux plans n'ont ni le même rôle ni le même déploiement ; la séparation allège le RPi5 et colle au modèle réel. Le nom de l'appareil ThingsBoard d'un camion reste stable quelle que soit la passerelle qui l'entend | Un seul service passerelle pour tout ; `site` = passerelle qui reçoit (le nom ThingsBoard changerait avec la passerelle) | proposé (à relire par la mobilité et le serveur) |
+| D37 | **Segmentation par VLAN, site unique.** Un switch administrable (802.1Q) porte les VLAN 10 MGMT, 20 SERVEURS, 30 OT-CAPTEURS, 40 CAMERAS, 50 BADGE, 60 PASSERELLES, 70 WIFI-STAFF et 999 PARKING, adressés en `10.<site>.<vlan>.0/24`. Le RPi3 route et filtre entre VLAN selon la matrice de flux (§2, vue réseau). Le **PC serveur dédié** (ThingsBoard, ChirpStack, `lora-ingest`, bus central, Wazuh) est branché sur ce switch, dans le VLAN 20 ; le RPi5 est dans le VLAN 60 et ouvre ses connexions vers le 20, jamais l'inverse. Version vulnérable : mêmes VLAN, règles tout ouvertes ; version durcie : la matrice | Proposition de Rémi (réseau). La segmentation donne un vrai périmètre par fonction et une comparaison avant/après pour la démo ; un tunnel terminé sur le pare-feu, contrairement à Tailscale, ne contourne pas les VLAN. Le PC dédié au laboratoire résout aussi D12 (rien sur une machine partagée) | Réseau à plat derrière le RPi3 ; ThingsBoard sur la machine partagée du département | décidé (matrice de flux : proposée) |
+| D38 | **Pas de VPN pour le POC.** WireGuard (terminé sur les routeurs) servira seulement à relier un second site au siège, ce qui n'est pas fait pour l'instant. **Tailscale est abandonné** (remplace D11). Conséquence : une fois le matériel au laboratoire, l'administration se fait sur place, depuis le VLAN 10 | Un seul site, donc aucun flux ne sort du réseau de l'entrepôt ; pas de service tiers ; WireGuard est standard, auto-hébergé, et ses règles s'appliquent au pare-feu | Tailscale (SaaS ou Headscale) ; WireGuard dès maintenant | décidé |
 
 ---
 
@@ -179,9 +254,9 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | # | Question | Pour qui | Dépend de |
 |---|---|---|---|
 | O1 | Le HAT Dragino fonctionne-t-il sur Pi 5 ? Test d'un registre du SX1276 sur la journée | RPi5 | étape 0 du plan |
-| O2 | Tailscale SaaS ou Headscale sur la machine de l'école ? | équipe | voir §5 |
-| O3 | Combien d'utilisateurs ont besoin du tailnet ? L'offre gratuite affichait jusqu'à 6 utilisateurs et un usage non commercial (à revérifier) | équipe | O2 |
-| O4 | HTTPS pour la page de visualisation vidéo : certificats via Tailscale ou via un proxy local ? | RPi5 | O2 |
+| O2 | ~~Tailscale SaaS ou Headscale sur la machine de l'école ?~~ → **caduc : Tailscale abandonné (D38)** | — | — |
+| O3 | ~~Combien d'utilisateurs ont besoin du tailnet ? L'offre gratuite affichait jusqu'à 6 utilisateurs et un usage non commercial (à revérifier)~~ → **caduc : Tailscale abandonné (D38)** | — | — |
+| O4 | HTTPS pour la page de visualisation vidéo : autorité de certification locale ou proxy local (plus de certificats Tailscale, D38) ? | RPi5 | D37 |
 | O5 | Autorisation écrite de M. Ferrère pour les tests d'attaque (périmètre, machines concernées) | équipe | avant toute attaque |
 | O6 | Quels protocoles sont obligatoires pour la recette ? Traçabilité attendue ? | équipe | e-mail à M. Ferrère |
 | O7 | RAM du RPi5 : **4 Go confirmés**. Budget à mesurer à l'étape 1 avec Mosquitto, le forwarder LoRa, Suricata, Wazuh agent, `ffmpeg` et les services Rust (ChirpStack, PostgreSQL et Redis ont quitté le RPi5, D35). Suricata est le poste à surveiller | RPi5 | étape 1 |
@@ -189,7 +264,7 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | O9 | Algorithme de signature de la carte (ECDSA P-256 ou AES-CMAC) | JavaCard | cours de cartes à puce |
 | O10 | Où placer le PIR : sur l'Arduino (entrée discrète Modbus) ou sur la caméra ? | Arduino + caméra | matériel |
 | O11 | Détection d'anomalies : règles côté ThingsBoard et Wazuh d'abord ? | Blue | — |
-| O12 | Un compte et un tailnet dédiés au projet, avec deux administrateurs, plutôt que le compte personnel d'une personne | équipe | O2 |
+| O12 | ~~Un compte et un tailnet dédiés au projet, avec deux administrateurs, plutôt que le compte personnel d'une personne~~ → **caduc : Tailscale abandonné (D38)** | — | — |
 | O13 | ~~Langage de l'outillage de test et des mocks~~ → **résolu : Python (D26)** | — | — |
 | O14 | Langage du service `access` et du client APDU (dépend de la bibliothèque PC/SC disponible dans chaque langage) | JavaCard | O13 |
 | O15 | Qui écrit la bibliothèque C++ de trame : la passerelle (RPi5) ou la personne mobilité ? | RPi5, mobilité | — |
@@ -198,8 +273,11 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | O18 | ~~Où vit le nom de zone~~ → **résolu : `pollers.toml` + champ `zone` du `status` (D31)** | — | — |
 | O19 | ~~Source des seuils~~ → **résolu : `pollers.toml` (D30)**. Reste à vérifier que l'API REST de ThingsBoard pose les attributs côté serveur | serveur | D30 |
 | O20 | ~~Numéro de série lisible~~ → **résolu : registres 7–8 (D32)**. Reste : format de `pollers.toml`, et accord de la personne Arduino | RPi5, Arduino | D32 |
-| O21 | Une version vulnérable de ChirpStack (contrôle des compteurs de trames désactivé, par exemple) ne peut pas tourner sur la machine partagée de l'école (D12) : seconde instance au laboratoire ? Le Gateway Bridge est-il côté RPi5 ou côté serveur, et quel protocole de forwarder (Semtech UDP ou Basics Station) | RPi5, serveur | D35 |
-| O22 | Qui héberge ChirpStack, `lora-ingest` et le bus central sur la machine de l'école ? | serveur | D35 |
+| O21 | Le PC serveur étant dédié et au laboratoire (D37), une instance vulnérable de ChirpStack (contrôle des compteurs de trames désactivé, par exemple) peut y tourner sans enfreindre D12, séparée de l'instance durcie. Reste : le Gateway Bridge est-il côté RPi5 ou côté serveur, et quel protocole de forwarder (Semtech UDP ou Basics Station) ? | RPi5, serveur | D35, D37 |
+| O22 | Qui administre le PC serveur (ThingsBoard, ChirpStack, `lora-ingest`, bus central, Wazuh) ? | serveur | D37 |
+| O23 | Le RPi3 n'a qu'un port Ethernet, pris par le trunk 802.1Q : WAN par un adaptateur USB-Ethernet, ou par un VLAN « WAN » sur le switch ? | WAN | D37 |
+| O24 | Le WiFi intégré du RPi3 sait-il servir deux SSID associés à deux VLAN (caméras en 40, personnel en 70) ? Sinon, un second point d'accès | WAN | D37 |
+| O25 | Ports exacts de la matrice de flux : forwarder → Gateway Bridge (UDP 1700 ?), agent Wazuh (1514–1515 ?) | WAN, RPi5, serveur | D37 |
 
 ## 5. Risques
 
@@ -207,8 +285,9 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 2. **Radio sur Pi 5 non confirmée** (O1). Atténuation : test le premier jour, repli en simulation et demande d'une passerelle à l'école.
 3. **Matériel tardif** (caméras, PIR, pression). Atténuation : mocks fidèles au contrat, test de conformité rejouable sur le vrai matériel.
 4. **Surface d'attaque réelle** : une version vulnérable accessible depuis internet ou le réseau de l'école (D12, O5).
-5. **Dépendance à un service tiers** (Tailscale). À discuter dans le rapport avec l'alternative auto-hébergée.
+5. ~~**Dépendance à un service tiers** (Tailscale)~~ : écartée, Tailscale est abandonné (D38).
 6. **Contrat qui dérive** sans tests automatiques. Atténuation : CI qui teste chaque mock contre le contrat.
 7. **Courbe d'apprentissage de Rust sur le chemin critique.** La passerelle est le point où tout converge. Atténuation : essai de 3 jours avec critères d'arrêt, services séparés par le bus donc remplaçables un par un, repli Go.
 8. **Mémoire du RPi5 (4 Go).** Beaucoup de services sur une seule carte (voir O7). Atténuation : mesure dès l'étape 1, limites mémoire par conteneur, règles Suricata réduites, et en dernier recours déplacer Wazuh ou la vidéo ailleurs.
-9. **Dépendance réseau du plan LoRaWAN (D35).** Le forwarder du RPi5 atteint ChirpStack par le réseau privé (Tailscale, encore en question : O2). Atténuation : ChirpStack reste déployable sur un Mac de développement ou sur le RPi5 avec le même fichier Compose.
+9. **Routeur inter-VLAN unique (D37).** Tout le trafic entre VLAN (flux vidéo, paquets LoRa, ThingsBoard) passe par le RPi3, à 100 Mbit/s sur un Pi 3 B : goulot d'étranglement et point unique de panne. Atténuation : mesurer le débit du flux caméra à l'étape 5 ; pour la partie Blue, c'est aussi le point de filtrage unique à surveiller.
+10. **Pas d'administration à distance (D38).** Une fois le matériel au laboratoire, il ne s'administre que sur place, depuis le VLAN 10. Atténuation : développer en simulation hors du labo, et prévoir les créneaux de présence pour l'intégration.

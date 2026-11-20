@@ -20,7 +20,7 @@ Surveillance et traçabilité de produits pharmaceutiques (INSA STI 5A, option 2
 
 **Deux plans, deux bus** *(D36)*. Le système se découpe en deux plans qui ne se rejoignent que dans ThingsBoard et dans l'enveloppe du §2 :
 - **Plan entrepôt** : Arduino (Modbus RTU), accès, vidéo → passerelle locale RPi5 → bus MQTT de l'entrepôt (Mosquitto sur le RPi5) → `tb-bridge`. Il fonctionne sans internet.
-- **Plan LoRaWAN** : ESP32 du camion → passerelle LoRa (le HAT du RPi5 pour le POC) → ChirpStack (machine de l'école) → `lora-ingest` → bus central → `tb-bridge`. LoRaWAN est un réseau partagé de passerelles ; le POC n'en a qu'une (§4.0).
+- **Plan LoRaWAN** : ESP32 du camion → passerelle LoRa (le HAT du RPi5 pour le POC) → ChirpStack (PC serveur, VLAN 20) → `lora-ingest` → bus central → `tb-bridge`. LoRaWAN est un réseau partagé de passerelles ; le POC n'en a qu'une (§4.0).
 
 ## 1. Terrain : Arduino ↔ RPi5 (Modbus RTU)
 
@@ -72,7 +72,7 @@ Surveillance et traçabilité de produits pharmaceutiques (INSA STI 5A, option 2
 
 - **QoS 1** partout. `retain` uniquement pour `status` (+ Last Will `{"online": false}`).
 - Pas de topic de commande en v1 (rien ne pilote le terrain depuis le bus).
-- Le plan LoRaWAN publie sur un **bus central** (Mosquitto de la machine de l'école), avec les mêmes topics et la même enveloppe ; le bus de l'entrepôt ne transporte pas les messages des camions. Pour un camion, `site` est son **site d'attache** (donné par la configuration de `lora-ingest`), jamais la passerelle qui l'a entendu : le nom de l'appareil dans ThingsBoard (`{site}.{src.id}`) doit rester stable quelle que soit la passerelle qui reçoit *(D36)*.
+- Le plan LoRaWAN publie sur un **bus central** (Mosquitto du PC serveur), avec les mêmes topics et la même enveloppe ; le bus de l'entrepôt ne transporte pas les messages des camions. Pour un camion, `site` est son **site d'attache** (donné par la configuration de `lora-ingest`), jamais la passerelle qui l'a entendu : le nom de l'appareil dans ThingsBoard (`{site}.{src.id}`) doit rester stable quelle que soit la passerelle qui reçoit *(D36)*.
 - Un seul schéma, validé en CI : [`schemas/envelope.schema.json`](schemas/envelope.schema.json). Exemples valides et invalides : `schemas/test_schemas.py`.
 
 **Exemple (température d'entrepôt) :**
@@ -99,7 +99,7 @@ Un service `tb-bridge` s'abonne à `pharma/#` et publie vers ThingsBoard, en MQT
 - Clés de télémétrie = clés de `data`. Horodatage = `ts` de l'enveloppe.
 - Topic MQTT de la *Gateway API* : `v1/gateway/telemetry`, charge utile `{"wh01.env-01":[{"ts":…,"values":{…}}]}` **[à vérifier dans la doc de la version installée]**.
 - **File d'attente locale persistante** (SQLite) côté `tb-bridge` : coupure internet = on rejoue au retour, dans l'ordre, sans perte ni doublon.
-- Connexion **sortante seulement** (aucun port ouvert vers l'entrepôt depuis internet).
+- Connexion **sortante seulement** (aucun port ouvert vers l'entrepôt depuis internet). Sur le site, le RPi5 (VLAN 60) ouvre la connexion vers le PC serveur (VLAN 20), jamais l'inverse (D37).
 - Les **alarmes de température** sont calculées **une seule fois, dans ThingsBoard** (chaîne de règles), à partir des attributs serveur `temp_min_c = 2.0` et `temp_max_c = 8.0` (chaîne du froid 2–8 °C). Les messages `alarm` du bus sont réservés aux alarmes **locales** (intrusion).
 - Modèle d'entités : *Asset* `Entrepôt` et *Asset* `Camion`, reliés à leurs appareils par des relations. Une *Expédition* (futur) sera un asset relié au camion.
 
@@ -109,7 +109,7 @@ Un service `tb-bridge` s'abonne à `pharma/#` et publie vers ThingsBoard, en MQT
 
 LoRaWAN est un réseau **partagé** : en situation réelle, une multitude de passerelles réparties sur le territoire écoutent la radio et relaient les paquets, sans les déchiffrer, vers un serveur réseau **central**. Le camion ne connaît pas la passerelle qui l'entend ; le serveur réseau supprime les doublons quand plusieurs passerelles reçoivent la même trame. Pour le POC :
 - **une seule passerelle** (le HAT du RPi5), et le camion est **supposé toujours à sa portée** ;
-- le serveur réseau (ChirpStack) est sur la machine de l'école, pas sur le RPi5 ;
+- le serveur réseau (ChirpStack) est sur le PC serveur (VLAN 20, D37), pas sur le RPi5 ;
 - la passerelle LoRa est un plan à part de la passerelle d'entrepôt : elle ne dépend pas du bus MQTT de l'entrepôt, et sa seule sortie est le lien vers ChirpStack.
 
 ### 4.1 Paramètres radio (imposés par le HAT Dragino single-channel)
@@ -156,8 +156,8 @@ LoRaWAN est un réseau **partagé** : en situation réelle, une multitude de pas
 
 ### 4.5 Côté serveur : ChirpStack et `lora-ingest`
 
-- **Passerelle LoRa (RPi5)** : un *forwarder* mono-canal (HAT Dragino, 868,1 MHz, DR5) envoie les paquets bruts à `chirpstack-gateway-bridge` ; la passerelle est déclarée dans ChirpStack par l'EUI de son HAT. Le protocole du forwarder (*Semtech UDP*, ou *Basics Station* si le forwarder le permet) et l'emplacement du Gateway Bridge sont **[à vérifier dans la documentation de ChirpStack v4]**. Le protocole *Semtech UDP* n'authentifie pas la passerelle : le lien doit rester dans le réseau privé de l'équipe (Tailscale, D11), et c'est une surface d'attaque (faux uplinks) pour la Red Team.
-- **Instances** *(à décider, O21)* : une version vulnérable de ChirpStack (par exemple sans contrôle des compteurs de trames, pour démontrer un rejeu) ne doit pas tourner sur la machine partagée de l'école (D12) ; elle aurait sa propre instance au laboratoire.
+- **Passerelle LoRa (RPi5)** : un *forwarder* mono-canal (HAT Dragino, 868,1 MHz, DR5) envoie les paquets bruts à `chirpstack-gateway-bridge` ; la passerelle est déclarée dans ChirpStack par l'EUI de son HAT. Le protocole du forwarder (*Semtech UDP*, ou *Basics Station* si le forwarder le permet) et l'emplacement du Gateway Bridge sont **[à vérifier dans la documentation de ChirpStack v4]**. Le protocole *Semtech UDP* n'authentifie pas la passerelle : le lien ne doit traverser que le réseau segmenté du site (du VLAN 60 au VLAN 20, D37), et c'est une surface d'attaque (faux uplinks) pour la Red Team.
+- **Instances** *(à décider, O21)* : une version vulnérable de ChirpStack (par exemple sans contrôle des compteurs de trames, pour démontrer un rejeu) ne doit jamais être exposée hors du laboratoire (D12) : sur le PC serveur dédié (D37), elle tourne en instance séparée de la version durcie.
 - Profil d'appareil `esp32-abp-eu868`. Le codec JavaScript [`lorawan/chirpstack_codec.js`](lorawan/chirpstack_codec.js) est **facultatif** : il sert seulement à afficher les données décodées dans l'interface de ChirpStack.
 - Le service `lora-ingest`, déployé sur le serveur à côté de ChirpStack, lit les événements d'uplink ChirpStack (topic MQTT du type `application/{app_id}/device/{dev_eui}/event/up`) et **décode lui-même** la charge utile déjà déchiffrée par ChirpStack, fournie en base64 dans `data` **[à vérifier : champs exacts de la version installée]**. Pour chaque enregistrement, il publie un message `truck/telemetry` sur le **bus central** (`rx` = heure d'arrivée de l'uplink ; `site` = site d'attache du camion et `src.id` viennent de la configuration de `lora-ingest`, par `dev_eui`).
 - Codec de référence, vecteurs de test communs et test de non-régression : `lorawan/truck_frame.py`, `lorawan/truck_vectors.json`, `lorawan/test_codec.js`. Le firmware ESP32 doit produire exactement les mêmes octets que `truck_vectors.json`.
