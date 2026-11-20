@@ -18,6 +18,10 @@ Surveillance et traçabilité de produits pharmaceutiques (INSA STI 5A, option 2
 | Valeur invalide | `null` côté JSON ; valeur sentinelle documentée côté binaire |
 | Encodage binaire | **little-endian** (natif ESP32) |
 
+**Deux plans, deux bus** *(D36)*. Le système se découpe en deux plans qui ne se rejoignent que dans ThingsBoard et dans l'enveloppe du §2 :
+- **Plan entrepôt** : Arduino (Modbus RTU), accès, vidéo → passerelle locale RPi5 → bus MQTT de l'entrepôt (Mosquitto sur le RPi5) → `tb-bridge`. Il fonctionne sans internet.
+- **Plan LoRaWAN** : ESP32 du camion → passerelle LoRa (le HAT du RPi5 pour le POC) → ChirpStack (machine de l'école) → `lora-ingest` → bus central → `tb-bridge`. LoRaWAN est un réseau partagé de passerelles ; le POC n'en a qu'une (§4.0).
+
 ## 1. Terrain : Arduino ↔ RPi5 (Modbus RTU)
 
 **Liaison :** RS485, **9600 bauds, 8N1**. Le RPi5 est le **seul maître**, via l'adaptateur USB-RS485 (`/dev/ttyUSB0`). Le bus accepte **plusieurs nœuds** (par exemple un Arduino par salle) : chaque nœud a sa propre adresse d'esclave (1 à 247, défaut 1) et son `src.id` (`env-01`, `env-02`…), déclarés dans le fichier de configuration du poller. Le poller interroge les nœuds l'un après l'autre ; un échange de 9 registres coûte de l'ordre de 50 ms. Période d'interrogation : 10 s par nœud. Tous les nœuds implémentent **la même table** ci-dessous. *(D29, décidé)* Le bus ne transporte **aucun nom métier** : le fichier de configuration du poller associe chaque adresse à un `src.id` stable et à une `zone` (emplacement), publiée dans le `status` du nœud *(D31, décidé)*. Format de ce fichier : [`schemas/pollers.schema.json`](schemas/pollers.schema.json), exemple dans [`examples/pollers.example.toml`](examples/pollers.example.toml) *(D33)*.
@@ -53,7 +57,7 @@ Surveillance et traçabilité de produits pharmaceutiques (INSA STI 5A, option 2
 | Exemple de topic | Producteur |
 |---|---|
 | `pharma/wh01/env/env-01/telemetry` | poller Modbus |
-| `pharma/wh01/truck/truck-01/telemetry` | ingestion LoRaWAN |
+| `pharma/wh01/truck/truck-01/telemetry` | `lora-ingest` (bus central, §4.5) |
 | `pharma/wh01/access/reader-01/event` | service contrôle d'accès |
 | `pharma/wh01/motion/pir-01/event` | poller (entrée discrète) ou ESP32 |
 | `pharma/wh01/cam/cam-01/status` | enregistreur vidéo |
@@ -68,6 +72,7 @@ Surveillance et traçabilité de produits pharmaceutiques (INSA STI 5A, option 2
 
 - **QoS 1** partout. `retain` uniquement pour `status` (+ Last Will `{"online": false}`).
 - Pas de topic de commande en v1 (rien ne pilote le terrain depuis le bus).
+- Le plan LoRaWAN publie sur un **bus central** (Mosquitto de la machine de l'école), avec les mêmes topics et la même enveloppe ; le bus de l'entrepôt ne transporte pas les messages des camions. Pour un camion, `site` est son **site d'attache** (donné par la configuration de `lora-ingest`), jamais la passerelle qui l'a entendu : le nom de l'appareil dans ThingsBoard (`{site}.{src.id}`) doit rester stable quelle que soit la passerelle qui reçoit *(D36)*.
 - Un seul schéma, validé en CI : [`schemas/envelope.schema.json`](schemas/envelope.schema.json). Exemples valides et invalides : `schemas/test_schemas.py`.
 
 **Exemple (température d'entrepôt) :**
@@ -88,7 +93,7 @@ Le **même** contrat sert aux deux versions de l'infrastructure : vulnérable (`
 
 ## 3. Vers le cloud : RPi5 → ThingsBoard
 
-Un service `tb-bridge` s'abonne à `pharma/#` et publie vers ThingsBoard, en MQTT, avec **un seul jeton d'accès** (celui d'un appareil de type *gateway*).
+Un service `tb-bridge` s'abonne à `pharma/#` et publie vers ThingsBoard, en MQTT, avec **un seul jeton d'accès** (celui d'un appareil de type *gateway*). Il tourne en **deux instances indépendantes**, chacune avec son propre jeton : l'une sur le RPi5 (bus de l'entrepôt), l'autre sur le serveur (bus central, plan LoRaWAN) *(D36)*.
 
 - Nom de l'appareil ThingsBoard : `{site}.{src.id}` (ex. `wh01.env-01`).
 - Clés de télémétrie = clés de `data`. Horodatage = `ts` de l'enveloppe.
@@ -99,6 +104,13 @@ Un service `tb-bridge` s'abonne à `pharma/#` et publie vers ThingsBoard, en MQT
 - Modèle d'entités : *Asset* `Entrepôt` et *Asset* `Camion`, reliés à leurs appareils par des relations. Une *Expédition* (futur) sera un asset relié au camion.
 
 ## 4. Trame LoRaWAN du camion
+
+### 4.0 Modèle réseau *(D35, D36)*
+
+LoRaWAN est un réseau **partagé** : en situation réelle, une multitude de passerelles réparties sur le territoire écoutent la radio et relaient les paquets, sans les déchiffrer, vers un serveur réseau **central**. Le camion ne connaît pas la passerelle qui l'entend ; le serveur réseau supprime les doublons quand plusieurs passerelles reçoivent la même trame. Pour le POC :
+- **une seule passerelle** (le HAT du RPi5), et le camion est **supposé toujours à sa portée** ;
+- le serveur réseau (ChirpStack) est sur la machine de l'école, pas sur le RPi5 ;
+- la passerelle LoRa est un plan à part de la passerelle d'entrepôt : elle ne dépend pas du bus MQTT de l'entrepôt, et sa seule sortie est le lien vers ChirpStack.
 
 ### 4.1 Paramètres radio (imposés par le HAT Dragino single-channel)
 
@@ -136,15 +148,18 @@ Un service `tb-bridge` s'abonne à `pharma/#` et publie vers ThingsBoard, en MQT
 ### 4.4 Règles d'envoi
 
 - Le camion enregistre une mesure toutes les 60 s (configurable) dans la flash. **Rien n'est jamais perdu silencieusement** : si la mémoire est pleine, on écrase le plus ancien et on lève `gap_before` sur le suivant.
-- Dès qu'il est à portée, il décharge les lots dans l'ordre. Chaque trame est envoyée **une seule fois**. Le serveur détecte les trous grâce à `frame_idx/frame_total` et au compteur de trames `fCnt`.
-- **Duty cycle 1 % (EU868) :** une trame de 165 o prend environ 0,3 s d'antenne **[à confirmer avec un calculateur d'airtime]**, donc **au moins ~30 s entre deux trames**. Ordre de grandeur : 2 h de trajet à 1 mesure/min = 120 mesures = 12 trames ≈ 6 min de déchargement.
+- **Envoi au fil de l'eau** *(D36)* : la portée de la passerelle étant supposée acquise (§4.0), le camion envoie ses lots dès qu'ils sont prêts, dans l'ordre, sans attendre un retour à l'entrepôt. La taille d'un lot est configurable de 1 à 10 enregistrements ; un lot d'un seul enregistrement est valide. **[à confirmer avec la mobilité : taille de lot par défaut]**
+- La flash sert de **tampon** : après un redémarrage ou une interruption, le camion envoie les enregistrements restants, avec les mêmes règles de cadence. Les messages étant non confirmés, le camion ne sait pas si une trame a été reçue : chaque trame est envoyée **une seule fois**, et le serveur détecte les trous grâce à `frame_idx/frame_total` et au compteur de trames `fCnt`.
+- **Duty cycle 1 % (EU868) :** une trame de 165 o prend environ 0,3 s d'antenne **[à confirmer avec un calculateur d'airtime]**, donc **au moins ~30 s entre deux trames**. Ordre de grandeur : à 1 mesure/min et 10 enregistrements par lot, un lot toutes les 10 min ; un rattrapage de 120 mesures représente 12 trames, soit environ 6 min d'émission.
 - **Compteur de trames :** écrit en mémoire non volatile (NVS) tous les 10 envois, et repris à `valeur + 10` après un redémarrage. Sinon le serveur rejette le camion comme un rejeu.
 - Le serveur **déduplique** par `(dev_eui, ts)` : un ré-envoi futur ne crée pas de doublon.
 
-### 4.5 Côté ChirpStack
+### 4.5 Côté serveur : ChirpStack et `lora-ingest`
 
+- **Passerelle LoRa (RPi5)** : un *forwarder* mono-canal (HAT Dragino, 868,1 MHz, DR5) envoie les paquets bruts à `chirpstack-gateway-bridge` ; la passerelle est déclarée dans ChirpStack par l'EUI de son HAT. Le protocole du forwarder (*Semtech UDP*, ou *Basics Station* si le forwarder le permet) et l'emplacement du Gateway Bridge sont **[à vérifier dans la documentation de ChirpStack v4]**. Le protocole *Semtech UDP* n'authentifie pas la passerelle : le lien doit rester dans le réseau privé de l'équipe (Tailscale, D11), et c'est une surface d'attaque (faux uplinks) pour la Red Team.
+- **Instances** *(à décider, O21)* : une version vulnérable de ChirpStack (par exemple sans contrôle des compteurs de trames, pour démontrer un rejeu) ne doit pas tourner sur la machine partagée de l'école (D12) ; elle aurait sa propre instance au laboratoire.
 - Profil d'appareil `esp32-abp-eu868`. Le codec JavaScript [`lorawan/chirpstack_codec.js`](lorawan/chirpstack_codec.js) est **facultatif** : il sert seulement à afficher les données décodées dans l'interface de ChirpStack.
-- Le service `lora-ingest` lit les événements d'uplink ChirpStack (topic MQTT du type `application/{app_id}/device/{dev_eui}/event/up`) et **décode lui-même** la charge utile déjà déchiffrée par ChirpStack, fournie en base64 dans `data` **[à vérifier : champs exacts de la version installée]**. Pour chaque enregistrement, il publie un message `truck/telemetry` sur le bus (`rx` = heure d'arrivée de l'uplink).
+- Le service `lora-ingest`, déployé sur le serveur à côté de ChirpStack, lit les événements d'uplink ChirpStack (topic MQTT du type `application/{app_id}/device/{dev_eui}/event/up`) et **décode lui-même** la charge utile déjà déchiffrée par ChirpStack, fournie en base64 dans `data` **[à vérifier : champs exacts de la version installée]**. Pour chaque enregistrement, il publie un message `truck/telemetry` sur le **bus central** (`rx` = heure d'arrivée de l'uplink ; `site` = site d'attache du camion et `src.id` viennent de la configuration de `lora-ingest`, par `dev_eui`).
 - Codec de référence, vecteurs de test communs et test de non-régression : `lorawan/truck_frame.py`, `lorawan/truck_vectors.json`, `lorawan/test_codec.js`. Le firmware ESP32 doit produire exactement les mêmes octets que `truck_vectors.json`.
 
 ## 5. Contrôle d'accès : carte JavaCard ↔ lecteur (APDU ISO 7816)
@@ -183,7 +198,7 @@ Le RPi5 **tire** le flux (la caméra n'est jamais jointe depuis l'extérieur).
 | Arduino + shield | personne Arduino | registres Modbus (§1) | — | nœuds RTU simulés [`sim/modbus/`](../sim/modbus) | le poller lit les 9 registres sans erreur pendant 1 h |
 | Poller Modbus, bus MQTT, `tb-bridge` | RPi5 | messages §2, §3 | §1 | — | messages valides au schéma, coupure internet rejouée sans doublon |
 | ESP32 camion | 2 personnes mobilité | trames §4 | — | `sim-truck` (rejoue un trajet GPS) | les octets sont identiques à `truck_vectors.json` |
-| Ingestion LoRaWAN | RPi5 | `truck/telemetry` | §4 | uplinks injectés dans ChirpStack | 23 mesures de test reconstituées, pas de doublon |
+| Passerelle LoRa (forwarder) et ingestion LoRaWAN | RPi5 ; hébergement de ChirpStack et de `lora-ingest` : serveur **[à confirmer]** | `truck/telemetry` sur le bus central | §4 | uplinks injectés dans ChirpStack | 23 mesures de test reconstituées, pas de doublon |
 | Applet JavaCard | personne JavaCard | APDU §5 | — | simulateur de carte **[à vérifier : jCardSim ou lecteur virtuel]** | séquence SELECT → ID → AUTH passante |
 | Lecteur / décision locale | à répartir (JavaCard ou RPi5) | `access/event` | §5 | `sim-reader` (cartes fictives) | 7 cas de `reason` couverts |
 | Caméra | mobilité n°2 (après réception) | flux §6 | — | `sim-cam` | segments de 5 min écrits, rétention appliquée |

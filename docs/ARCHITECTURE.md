@@ -22,7 +22,7 @@ Un système multi-protocoles évolutif (remplacement futur de l'Arduino par une 
 
 | Niveau | Contenu | Nature |
 |---|---|---|
-| 1. Socle | Modbus RTU (température, humidité, pression), camion en LoRaWAN avec enregistrement différé, bus et ThingsBoard avec alarmes 2–8 °C, pare-feu RPi3, caméra, contrôle d'accès, détection d'intrusion, **version vulnérable de bout en bout** | indispensable |
+| 1. Socle | Modbus RTU (température, humidité, pression), camion en LoRaWAN (tampon local, envoi au fil de l'eau), bus et ThingsBoard avec alarmes 2–8 °C, pare-feu RPi3, caméra, contrôle d'accès, détection d'intrusion, **version vulnérable de bout en bout** | indispensable |
 | 2. Sécurité | Version durcie, SIEM, IDS, détection d'anomalies, scénarios d'attaque, Red/Blue Team | cœur de la 2ᵉ partie |
 | 3. Extensions | Modbus TCP puis OPC UA, nœud PSoC, OTAA avec un vrai concentrateur, lots et expéditions, application mobile | selon le temps |
 
@@ -35,7 +35,7 @@ Démo, rapport, soutenance. Fin du projet mi-janvier, fin de semestre le vendred
 1. Vue d'ensemble ThingsBoard, deux entrepôts (`wh01` réel, `wh02` simulé).
 2. Température, humidité et pression en direct (Modbus RTU).
 3. Valeur hors 2–8 °C : alarme et notification.
-4. Le camion revient et décharge ; trajet GPS et courbe de température.
+4. Le camion remonte ses mesures au fil de l'eau ; trajet GPS et courbe de température.
 5. Badge valide, badge inconnu : événements d'accès.
 6. Mouvement hors horaires : alarme et enregistrement vidéo.
 7. Un agent consulte la vidéo à distance, de façon authentifiée.
@@ -55,7 +55,8 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
 ```
  CLOUD / machine de l'école
  ┌───────────────────────────────────────────┐
- │ ThingsBoard CE    Wazuh manager            │
+ │ ChirpStack · lora-ingest · bus central    │
+ │ ThingsBoard CE    Wazuh manager           │
  └──────────────────▲────────────────────────┘
                     │ tailnet (Tailscale), connexions sortantes
  ENTREPÔT wh01      │
@@ -65,9 +66,9 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
         │ Ethernet (LAN)                      │ WiFi (sous-réseau IoT)
  ┌──────┴────────────── RPi5 ───────────────┐ └─ ESP32-CAM  ◄─ le RPi5 tire le flux
  │ Mosquitto (bus interne)                  │
- │ modbus-poller · lora-ingest · access      │
- │ recorder · tb-bridge · ChirpStack         │
- │ Suricata · agent Wazuh · chrony           │
+ │ modbus-poller · access · recorder        │
+ │ tb-bridge · forwarder LoRa (HAT)         │
+ │ Suricata · agent Wazuh · chrony          │
  └──┬──────────────┬───────────────┬────────┘
     │ USB-RS485    │ SPI + UART    │ USB
     │ Modbus RTU   │ HAT Dragino   │ lecteur de cartes ◄─ carte JavaCard
@@ -75,7 +76,7 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
  (+PIR)            ┊ radio LoRaWAN 868 MHz, ABP, un seul canal
  MOBILITÉ          ┊
  ┌─────────────────┴────┐
- │ ESP32 LoRa-GPS camion │  enregistre hors de portée, décharge au retour
+ │ ESP32 LoRa-GPS camion │  tampon en flash, envoi au fil de l'eau
  └───────────────────────┘
 ```
 
@@ -88,6 +89,8 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
 | Caméra ESP32-CAM | HTTP `/capture`, `/stream` | mobilité n°2 |
 | Lecteur et carte | APDU ISO 7816 | JavaCard |
 | Passerelle d'entrepôt (RPi5) | adaptateurs, bus, pont ThingsBoard | RPi5 |
+| Passerelle LoRa (HAT + forwarder, sur le RPi5) | paquets radio → ChirpStack | RPi5 |
+| Serveur réseau LoRaWAN (ChirpStack, `lora-ingest`, bus central) | uplinks → enveloppe | serveur **[à confirmer]** |
 | Périmètre réseau (RPi3) | pare-feu, accès | WAN |
 | Plateforme cloud | ThingsBoard | serveur |
 | SIEM, IDS, anomalies (Blue) | alertes, règles | WAN + serveur (proposé) |
@@ -99,7 +102,7 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
 1. **Contrat d'abord.** On développe contre `CONTRAT.md` et un mock, jamais contre le matériel d'un coéquipier.
 2. **Adaptateurs.** Chaque protocole est un adaptateur qui traduit vers l'enveloppe commune. Ajouter un protocole = écrire un adaptateur et sa fiche dans le contrat, sans changer le reste. Une seule abstraction, pas de framework.
 3. **Simulation d'abord.** Chaque étape marche en profil `sim` avant le profil `hw`.
-4. **Local d'abord.** L'entrepôt fonctionne sans internet : décision d'accès locale, file persistante vers ThingsBoard.
+4. **Local d'abord.** L'entrepôt fonctionne sans internet : décision d'accès locale, file persistante vers ThingsBoard. Cela vaut pour le plan entrepôt ; le plan LoRaWAN dépend, par nature, du serveur réseau central (D36).
 5. **Deux versions, un contrat.** Vulnérable et durcie partagent les mêmes interfaces. Seule la configuration de sécurité change.
 6. **Aucun secret dans un dépôt.** Clés LoRaWAN, jetons ThingsBoard, mots de passe WiFi, clés Tailscale vont dans des fichiers `.env` non versionnés.
 7. **Une direction de dépendance.** Tous les dépôts dépendent du contrat (version étiquetée), jamais les uns des autres. La seule frontière entre composants est le contrat plus une image de conteneur.
@@ -110,7 +113,7 @@ Chaque exigence du sujet est reliée à une étape de la démo (C1 à C12, O1 à
 | Dépôt | Contenu | Langage | Propriétaire |
 |---|---|---|---|
 | `pharma-contract` | spec, schémas JSON, vecteurs de test, mocks, tests de contrat, intégration (`compose`), ce document | Python typé (D26) | à désigner |
-| `pharma-gateway` | services du RPi5 : poller Modbus, ingestion LoRaWAN, enregistreur vidéo, pont ThingsBoard | **Rust** (voir D17) | RPi5 |
+| `pharma-gateway` | services du RPi5 : poller Modbus, enregistreur vidéo, pont ThingsBoard, et `lora-ingest` (code ici, déployé sur le serveur, D36) | **Rust** (voir D17) | RPi5 |
 | `pharma-firmware-warehouse` | nœud capteurs (Arduino, puis PSoC) et ESP32-CAM | C/C++ (Arduino / PlatformIO) | Arduino, mobilité n°2 |
 | `pharma-firmware-mobility` | ESP32 du camion, avec la bibliothèque d'encodage de trame | C++ (PlatformIO) | mobilité ×2 |
 | `pharma-javacard` | applet, client APDU de référence, service `access` (livré en image de conteneur) | Java, Rust ou autre : voir O14 | JavaCard |
@@ -135,8 +138,8 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | D01 | Un dépôt `pharma-contract` réunit contrat, mocks, tests et intégration. Les autres dépôts épinglent une version étiquetée | Éviter la dérive entre spec et simulation | Monorepo (refusé par l'équipe) ; contrat et intégration séparés | décidé |
 | D02 | Enveloppe JSON commune et bus MQTT interne (Mosquitto sur le RPi5) | Découple les protocoles du cloud, point de capture pour l'IDS et les tests | Chaque service parle directement à ThingsBoard | proposé |
 | D03 | Protocoles : **Modbus RTU et LoRaWAN obligatoires** ; Modbus TCP puis OPC UA secondaires | Cahier des charges minimal tenable ; Modbus TCP (vulnérable) puis OPC UA (sécurisé) racontent un durcissement | Tous les protocoles d'emblée (risque de ne pas finir) | décidé |
-| D04 | LoRaWAN en ABP, un canal et un SF fixés, avec le HAT Dragino (SX1276) ; ChirpStack sur le RPi5 | Matériel disponible ; ce HAT n'est pas une vraie passerelle multi-canaux et n'émet probablement pas de réponse de jonction | Concentrateur SX1302/1303 (non disponible) | proposé |
-| D05 | Camion : enregistrement local puis envoi différé au retour à portée | Pas de passerelle ni de 4G dans le camion ; l'historique complet suffit à la traçabilité | Passerelle embarquée avec clé 4G ; réseau public | décidé |
+| D04 | LoRaWAN en ABP, un canal et un SF fixés, avec le HAT Dragino (SX1276) ; ChirpStack sur la machine de l'école (D35) | Matériel disponible ; ce HAT n'est pas une vraie passerelle multi-canaux et n'émet probablement pas de réponse de jonction | Concentrateur SX1302/1303 (non disponible) | proposé |
+| D05 | Camion : enregistrement local en flash (tampon) ; envoi au fil de l'eau, la portée de la passerelle étant supposée acquise (D36, remplace l'envoi différé au retour à portée) | Pas de passerelle ni de 4G dans le camion ; l'historique complet suffit à la traçabilité | Passerelle embarquée avec clé 4G ; réseau public | décidé |
 | D06 | ThingsBoard CE auto-hébergé sur la machine de l'école (32 Go, Debian) | Déjà en place | ThingsBoard Cloud (payant, données chez un tiers) | décidé |
 | D07 | Contrôle d'accès : décision en local, journal envoyé au cloud | L'entrepôt doit s'ouvrir sans internet | Décision côté cloud | proposé |
 | D08 | Alarmes de température calculées une seule fois, dans ThingsBoard (seuils 2–8 °C en attributs) | Source unique, pas de doublon | Alarmes sur la passerelle | proposé |
@@ -149,7 +152,7 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | D15 | Traçabilité : définie plus tard par l'équipe. Elle repose sur l'enveloppe (heure, source, site) à laquelle on pourra ajouter un numéro de séquence ou une signature sans rien casser | Définition absente du sujet | Définir maintenant | décidé |
 | D16 | PSoC : remplace l'Arduino plus tard en implémentant la même table de registres Modbus ; compatibilité du shield = problème matériel à part | Le contrat isole le reste du système | Intégrer le PSoC dès maintenant | décidé (hors périmètre immédiat) |
 | D17 | **Rust** pour les services « industriels » de la passerelle (poller Modbus, ingestion LoRaWAN, adaptateurs futurs). Essai de 3 jours sur le poller, décision confirmée à la fin de la semaine 1. Critères : tranche terminée à temps, compile pour ARM 64 bits, code expliqué sans l'IA, CI en marche. Repli : Go pour le poller ; Dart envisageable pour les services de plomberie (maximum deux langages) | Langage typé sans ramasse-miettes, adapté à l'objectif embarqué et sécurité ; chaque service est un processus séparé, donc le langage peut changer sans toucher au reste | Dart (le plus maîtrisé, mais écosystème matériel mince), TypeScript, Kotlin/Java (JVM lourde sur le Pi), Go, C++ sur le chemin critique | décidé, sous réserve de l'essai |
-| D18 | Les trames LoRaWAN sont **décodées dans la passerelle** (`lora-ingest`), à partir des octets déjà déchiffrés par ChirpStack. Le codec JavaScript de ChirpStack devient facultatif (affichage dans son interface), écrit en JavaScript avec `@ts-check` et JSDoc | Supprime la dépendance à JavaScript ; un seul décodeur de référence | Codec JavaScript obligatoire ; TypeScript compilé | décidé |
+| D18 | Les trames LoRaWAN sont **décodées côté serveur** (`lora-ingest`, déployé à côté de ChirpStack, D36), à partir des octets déjà déchiffrés par ChirpStack. Le codec JavaScript de ChirpStack devient facultatif (affichage dans son interface), écrit en JavaScript avec `@ts-check` et JSDoc | Supprime la dépendance à JavaScript ; un seul décodeur de référence | Codec JavaScript obligatoire ; TypeScript compilé | décidé |
 | D19 | La bibliothèque d'encodage de trame est écrite en C++20 sans dépendance, dans `pharma-firmware-mobility`, testable sur le Mac contre `truck_vectors.json`, avec compilation sous sanitizers et fuzzing du décodeur | Utilisable telle quelle dans le firmware ESP32 ; travaille le point faible C++ sans toucher au chemin critique | Rust `no_std` sur ESP32 (chaîne d'outils plus lourde) | proposé (propriétaire : voir O15) |
 | D20 | Les trames sont vérifiées par le même fichier de vecteurs dans chaque langage : encodeur C++, décodeur Rust, codec JavaScript facultatif | Évite que trois implémentations divergent | Tests séparés par langage | proposé |
 | D21 | Pas de bibliothèque partagée par langage : le contrat publie des schémas JSON, chaque dépôt génère ses types | Neutre vis-à-vis du langage ; le compilateur détecte les dérives | Paquet Python partagé | proposé |
@@ -166,6 +169,8 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | D32 | **Numéro de série dans les registres d'entrée 7–8** (uint32, unique par carte, `0` = non programmé), ajout compatible v1.x. Le poller lit désormais les registres 0 à 8 et, si `pollers.toml` indique un numéro attendu, compare : écart ou `0` → pas de télémétrie pour ce nœud, alarme `identity_mismatch` (critique), champ `serial` dans le `status` | Détecte une carte échangée, une mauvaise adresse ou un appareil de remplacement ; matière pour la partie Blue. **Limite assumée :** ce n'est pas une authentification, un attaquant peut annoncer le même numéro | Adresse d'esclave seule | décidé (à faire accepter par la personne Arduino) |
 | D33 | **Format de configuration du poller : `pollers.toml`** (TOML, version `schema = 1`). Un seul `[bus]` par poller (une deuxième instance si un deuxième adaptateur apparaît), `[defaults]` hérités par chaque `[[node]]`, `serial` facultatif (absent = pas de vérification d'identité, avertissement dans le journal), `config_drift` toujours actif, pas de rechargement à chaud, aucun secret dans le fichier. Le **schéma JSON** (`contrat/schemas/pollers.schema.json`) couvre types, plages et motifs ; les règles de cohérence (unicité de `id`, `slave`, `serial`, `pir` ; `temp_min_c` < `temp_max_c` effectifs) sont dans `test_pollers.py`, que le poller Rust doit reproduire sur les mêmes cas invalides | TOML : commentaires, types explicites (entier ≠ flottant ≠ texte, pas d'ambiguïté `no`/`off`), grammaire courte, outillage natif en Rust (`serde` + crate `toml`) ; la configuration est peu imbriquée, donc `[[node]]` suffit. Le fichier est lu par deux consommateurs (poller, script de `pharma-infra`) : c'est une interface, donc un schéma | YAML (commentaires, mais typage implicite piégeux et plusieurs versions de la spécification ; le crate `serde_yaml` a, à ma connaissance, été archivé par son auteur), JSON (pas de commentaires, verbeux pour de la configuration écrite à la main) | décidé |
 | D34 | **Trois classes de fichiers.** (1) *Liés au programme*, versionnés dans le dépôt du programme : schéma, fichier exemple, valeurs par défaut, `.env.example`. (2) *Configuration de site*, sans secret, propre à un déploiement : `pollers.toml` réel, `compose` de déploiement (versions d'images figées). Le `compose` de développement et de simulation (`sim`, `hw`) reste dans `pharma-gateway`, avec les programmes. (3) *Secrets et fichiers d'exécution*, **jamais dans un dépôt** : mots de passe MQTT, jeton ThingsBoard, clés LoRaWAN, clé d'authentification Tailscale, certificats, `.env` ; ils sont créés sur la machine (ou via un coffre) et seul le `.env.example` est versionné. La classe (2) est versionnée dans `pharma-infra` et déployée vers `/etc/pharma/` | Principe 6 de ce document, étendu : un secret ne se relit pas dans l'historique Git ; une configuration sans secret gagne à être relue et restaurable (les seuils sont un choix métier qui se révise) | Tout hors dépôt (perd la relecture et le retour arrière, et le script ThingsBoard n'aurait plus de source) décidé. Règle pour `pollers.toml` : `pollers.example.toml` dans `pharma-gateway` ; en développement, une copie locale `pollers.toml` ignorée par Git ; le fichier réel d'un site dans `pharma-infra` quand on déploie vraiment. Ansible n'est pas requis avant l'étape 6 |
+| D35 | **ChirpStack sur la machine de l'école**, pas sur le RPi5. Le RPi5 n'est qu'une **passerelle LoRaWAN** (HAT + forwarder, déclarée par l'EUI du HAT) qui relaie les paquets à ChirpStack ; `lora-ingest` est déployé à côté de ChirpStack | Le professeur décrit LoRaWAN comme un réseau partagé de passerelles dispersées avec un serveur réseau central ; le POC n'a qu'une passerelle et suppose le camion toujours à sa portée. ChirpStack, PostgreSQL et Redis quittent le RPi5 (4 Go, O7) | ChirpStack sur le RPi5 (plus simple, mais contraire au modèle réel) | décidé |
+| D36 | **Deux plans séparés** : le plan entrepôt (Modbus, TCP, OPC UA, accès, vidéo, bus MQTT local, `tb-bridge`) et le plan LoRaWAN (passerelle LoRa, ChirpStack, `lora-ingest`, bus central, seconde instance de `tb-bridge`). Ils ne se rejoignent que dans ThingsBoard et dans l'enveloppe. Conséquences : le camion envoie **au fil de l'eau** (la flash reste un tampon, D05 amendée) ; son `site` est son **site d'attache** ; « local d'abord » ne vaut que pour le plan entrepôt ; le code de `lora-ingest` reste dans `pharma-gateway` mais se déploie sur le serveur | Les deux plans n'ont ni le même rôle ni le même déploiement ; la séparation allège le RPi5 et colle au modèle réel. Le nom de l'appareil ThingsBoard d'un camion reste stable quelle que soit la passerelle qui l'entend | Un seul service passerelle pour tout ; `site` = passerelle qui reçoit (le nom ThingsBoard changerait avec la passerelle) | proposé (à relire par la mobilité et le serveur) |
 
 ---
 
@@ -179,7 +184,7 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | O4 | HTTPS pour la page de visualisation vidéo : certificats via Tailscale ou via un proxy local ? | RPi5 | O2 |
 | O5 | Autorisation écrite de M. Ferrère pour les tests d'attaque (périmètre, machines concernées) | équipe | avant toute attaque |
 | O6 | Quels protocoles sont obligatoires pour la recette ? Traçabilité attendue ? | équipe | e-mail à M. Ferrère |
-| O7 | RAM du RPi5 : **4 Go confirmés**. Budget à mesurer à l'étape 1 avec ChirpStack, PostgreSQL, Redis, Mosquitto, Suricata, Wazuh agent, `ffmpeg` et les 5 services Rust. Suricata et PostgreSQL sont les postes à surveiller | RPi5 | étape 1 |
+| O7 | RAM du RPi5 : **4 Go confirmés**. Budget à mesurer à l'étape 1 avec Mosquitto, le forwarder LoRa, Suricata, Wazuh agent, `ffmpeg` et les services Rust (ChirpStack, PostgreSQL et Redis ont quitté le RPi5, D35). Suricata est le poste à surveiller | RPi5 | étape 1 |
 | O8 | Plateforme d'intégration continue : GitHub Actions sur dépôts privés. Minutes incluses et règles de protection de branche selon l'offre de l'organisation | équipe | offre GitHub |
 | O9 | Algorithme de signature de la carte (ECDSA P-256 ou AES-CMAC) | JavaCard | cours de cartes à puce |
 | O10 | Où placer le PIR : sur l'Arduino (entrée discrète Modbus) ou sur la caméra ? | Arduino + caméra | matériel |
@@ -193,6 +198,8 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 | O18 | ~~Où vit le nom de zone~~ → **résolu : `pollers.toml` + champ `zone` du `status` (D31)** | — | — |
 | O19 | ~~Source des seuils~~ → **résolu : `pollers.toml` (D30)**. Reste à vérifier que l'API REST de ThingsBoard pose les attributs côté serveur | serveur | D30 |
 | O20 | ~~Numéro de série lisible~~ → **résolu : registres 7–8 (D32)**. Reste : format de `pollers.toml`, et accord de la personne Arduino | RPi5, Arduino | D32 |
+| O21 | Une version vulnérable de ChirpStack (contrôle des compteurs de trames désactivé, par exemple) ne peut pas tourner sur la machine partagée de l'école (D12) : seconde instance au laboratoire ? Le Gateway Bridge est-il côté RPi5 ou côté serveur, et quel protocole de forwarder (Semtech UDP ou Basics Station) | RPi5, serveur | D35 |
+| O22 | Qui héberge ChirpStack, `lora-ingest` et le bus central sur la machine de l'école ? | serveur | D35 |
 
 ## 5. Risques
 
@@ -204,3 +211,4 @@ Un dépôt `.github` public existe (D24) : GitHub exige qu'il soit public pour f
 6. **Contrat qui dérive** sans tests automatiques. Atténuation : CI qui teste chaque mock contre le contrat.
 7. **Courbe d'apprentissage de Rust sur le chemin critique.** La passerelle est le point où tout converge. Atténuation : essai de 3 jours avec critères d'arrêt, services séparés par le bus donc remplaçables un par un, repli Go.
 8. **Mémoire du RPi5 (4 Go).** Beaucoup de services sur une seule carte (voir O7). Atténuation : mesure dès l'étape 1, limites mémoire par conteneur, règles Suricata réduites, et en dernier recours déplacer Wazuh ou la vidéo ailleurs.
+9. **Dépendance réseau du plan LoRaWAN (D35).** Le forwarder du RPi5 atteint ChirpStack par le réseau privé (Tailscale, encore en question : O2). Atténuation : ChirpStack reste déployable sur un Mac de développement ou sur le RPi5 avec le même fichier Compose.
