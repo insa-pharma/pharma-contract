@@ -1,0 +1,6 @@
+# Outillage de test et simulation (Python 3.11 ou plus)
+jsonschema
+pyserial
+pillow
+# facultatif : sert de lecteur Modbus indépendant dans sim/modbus/test_sim_modbus.py
+pymodbus
