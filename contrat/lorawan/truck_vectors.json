@@ -1,0 +1,278 @@
+{
+ "batch": [
+  {
+   "port": 10,
+   "hex": "010700030aa0a4f7681bd7470060a70300c2015a01dca4f76825d7470056a70300c3015b0118a5f7682fd747004ca70300c4015c0154a5f76839d7470042a70300c5015d0190a5f76843d7470038a70300c6015e01cca5f768ffffff7fffffff7fc7015f0008a6f76857d7470024a703000080ff0144a6f76861d747001aa703001efb610780a6f7686bd7470010a70300ca016201bca6f76875d7470006a70300cb016301",
+   "decoded": {
+    "batch_id": 7,
+    "frame_idx": 0,
+    "frame_total": 3,
+    "records": [
+     {
+      "ts_ms": 1761060000000,
+      "temperature_c": 4.5,
+      "humidity_pct": 45.0,
+      "gps_fix": true,
+      "lat": 47.08123,
+      "lon": 2.39456,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060060000,
+      "temperature_c": 4.51,
+      "humidity_pct": 45.5,
+      "gps_fix": true,
+      "lat": 47.08133,
+      "lon": 2.39446,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060120000,
+      "temperature_c": 4.52,
+      "humidity_pct": 46.0,
+      "gps_fix": true,
+      "lat": 47.08143,
+      "lon": 2.39436,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060180000,
+      "temperature_c": 4.53,
+      "humidity_pct": 46.5,
+      "gps_fix": true,
+      "lat": 47.08153,
+      "lon": 2.39426,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060240000,
+      "temperature_c": 4.54,
+      "humidity_pct": 47.0,
+      "gps_fix": true,
+      "lat": 47.08163,
+      "lon": 2.39416,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060300000,
+      "temperature_c": 4.55,
+      "humidity_pct": 47.5,
+      "gps_fix": false,
+      "lat": null,
+      "lon": null,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060360000,
+      "temperature_c": null,
+      "humidity_pct": null,
+      "gps_fix": true,
+      "lat": 47.08183,
+      "lon": 2.39396,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060420000,
+      "temperature_c": -12.5,
+      "humidity_pct": 48.5,
+      "gps_fix": true,
+      "lat": 47.08193,
+      "lon": 2.39386,
+      "gap_before": true,
+      "temp_alarm": true
+     },
+     {
+      "ts_ms": 1761060480000,
+      "temperature_c": 4.58,
+      "humidity_pct": 49.0,
+      "gps_fix": true,
+      "lat": 47.08203,
+      "lon": 2.39376,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060540000,
+      "temperature_c": 4.59,
+      "humidity_pct": 49.5,
+      "gps_fix": true,
+      "lat": 47.08213,
+      "lon": 2.39366,
+      "gap_before": false,
+      "temp_alarm": false
+     }
+    ]
+   }
+  },
+  {
+   "port": 10,
+   "hex": "010701030af8a6f7687fd74700fca60300cc01640134a7f76889d74700f2a60300cd01650170a7f76893d74700e8a60300ce016601aca7f7689dd74700dea60300cf016701e8a7f768a7d74700d4a60300d001680124a8f768b1d74700caa60300d101690160a8f768bbd74700c0a60300d2016a019ca8f768c5d74700b6a60300d3016b01d8a8f768cfd74700aca60300d4016c0114a9f768d9d74700a2a60300d5016d01",
+   "decoded": {
+    "batch_id": 7,
+    "frame_idx": 1,
+    "frame_total": 3,
+    "records": [
+     {
+      "ts_ms": 1761060600000,
+      "temperature_c": 4.6,
+      "humidity_pct": 50.0,
+      "gps_fix": true,
+      "lat": 47.08223,
+      "lon": 2.39356,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060660000,
+      "temperature_c": 4.61,
+      "humidity_pct": 50.5,
+      "gps_fix": true,
+      "lat": 47.08233,
+      "lon": 2.39346,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060720000,
+      "temperature_c": 4.62,
+      "humidity_pct": 51.0,
+      "gps_fix": true,
+      "lat": 47.08243,
+      "lon": 2.39336,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060780000,
+      "temperature_c": 4.63,
+      "humidity_pct": 51.5,
+      "gps_fix": true,
+      "lat": 47.08253,
+      "lon": 2.39326,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060840000,
+      "temperature_c": 4.64,
+      "humidity_pct": 52.0,
+      "gps_fix": true,
+      "lat": 47.08263,
+      "lon": 2.39316,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060900000,
+      "temperature_c": 4.65,
+      "humidity_pct": 52.5,
+      "gps_fix": true,
+      "lat": 47.08273,
+      "lon": 2.39306,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761060960000,
+      "temperature_c": 4.66,
+      "humidity_pct": 53.0,
+      "gps_fix": true,
+      "lat": 47.08283,
+      "lon": 2.39296,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761061020000,
+      "temperature_c": 4.67,
+      "humidity_pct": 53.5,
+      "gps_fix": true,
+      "lat": 47.08293,
+      "lon": 2.39286,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761061080000,
+      "temperature_c": 4.68,
+      "humidity_pct": 54.0,
+      "gps_fix": true,
+      "lat": 47.08303,
+      "lon": 2.39276,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761061140000,
+      "temperature_c": 4.69,
+      "humidity_pct": 54.5,
+      "gps_fix": true,
+      "lat": 47.08313,
+      "lon": 2.39266,
+      "gap_before": false,
+      "temp_alarm": false
+     }
+    ]
+   }
+  },
+  {
+   "port": 10,
+   "hex": "010702030350a9f768e3d7470098a60300d6016e018ca9f768edd747008ea60300d7016f01c8a9f768f7d7470084a60300d8017001",
+   "decoded": {
+    "batch_id": 7,
+    "frame_idx": 2,
+    "frame_total": 3,
+    "records": [
+     {
+      "ts_ms": 1761061200000,
+      "temperature_c": 4.7,
+      "humidity_pct": 55.0,
+      "gps_fix": true,
+      "lat": 47.08323,
+      "lon": 2.39256,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761061260000,
+      "temperature_c": 4.71,
+      "humidity_pct": 55.5,
+      "gps_fix": true,
+      "lat": 47.08333,
+      "lon": 2.39246,
+      "gap_before": false,
+      "temp_alarm": false
+     },
+     {
+      "ts_ms": 1761061320000,
+      "temperature_c": 4.72,
+      "humidity_pct": 56.0,
+      "gps_fix": true,
+      "lat": 47.08343,
+      "lon": 2.39236,
+      "gap_before": false,
+      "temp_alarm": false
+     }
+    ]
+   }
+  }
+ ],
+ "heartbeat": [
+  {
+   "port": 11,
+   "hex": "01930f170080510100",
+   "decoded": {
+    "battery_mv": 3987,
+    "pending_records": 23,
+    "uptime_s": 86400
+   }
+  }
+ ]
+}

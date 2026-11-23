@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pharma-iot.local/schemas/envelope.schema.json",
+  "title": "Enveloppe commune des messages internes (v1)",
+  "description": "Tout message publié sur le bus MQTT interne de l'entrepôt respecte cette enveloppe. Le sujet du topic est pharma/{site}/{src.type}/{src.id}/{kind}.",
+  "type": "object",
+  "required": [
+    "v",
+    "ts",
+    "site",
+    "src",
+    "kind",
+    "data"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "ts": {
+      "type": "integer",
+      "minimum": 1700000000000,
+      "description": "Instant de la MESURE, en millisecondes depuis l'epoch, UTC."
+    },
+    "rx": {
+      "type": "integer",
+      "minimum": 1700000000000,
+      "description": "Optionnel. Instant de réception par la passerelle (ms UTC)."
+    },
+    "site": {
+      "type": "string",
+      "pattern": "^[a-z0-9]{2,16}$"
+    },
+    "src": {
+      "type": "object",
+      "required": [
+        "type",
+        "id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "env",
+            "truck",
+            "access",
+            "motion",
+            "cam",
+            "gw"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        }
+      }
+    },
+    "kind": {
+      "enum": [
+        "telemetry",
+        "event",
+        "alarm",
+        "status"
+      ]
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/env_telemetry"
+    },
+    {
+      "$ref": "#/$defs/truck_telemetry"
+    },
+    {
+      "$ref": "#/$defs/access_event"
+    },
+    {
+      "$ref": "#/$defs/motion_event"
+    },
+    {
+      "$ref": "#/$defs/status"
+    },
+    {
+      "$ref": "#/$defs/alarm"
+    }
+  ],
+  "$defs": {
+    "env_telemetry": {
+      "properties": {
+        "src": {
+          "properties": {
+            "type": {
+              "const": "env"
+            }
+          }
+        },
+        "kind": {
+          "const": "telemetry"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "temperature_c",
+            "humidity_pct"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "temperature_c": {
+              "type": "number",
+              "minimum": -50,
+              "maximum": 100
+            },
+            "humidity_pct": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "pressure_hpa": {
+              "type": "number",
+              "minimum": 300,
+              "maximum": 1100
+            },
+            "sensor_ok": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "truck_telemetry": {
+      "properties": {
+        "src": {
+          "properties": {
+            "type": {
+              "const": "truck"
+            }
+          }
+        },
+        "kind": {
+          "const": "telemetry"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "temperature_c",
+            "humidity_pct",
+            "gps_fix"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "temperature_c": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": -50,
+              "maximum": 100
+            },
+            "humidity_pct": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "gps_fix": {
+              "type": "boolean"
+            },
+            "lat": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": -90,
+              "maximum": 90
+            },
+            "lon": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": -180,
+              "maximum": 180
+            },
+            "gap_before": {
+              "type": "boolean",
+              "description": "Des mesures ont été perdues (mémoire pleine) juste avant celle-ci."
+            },
+            "temp_alarm": {
+              "type": "boolean"
+            },
+            "dev_eui": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}$"
+            },
+            "fcnt": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "access_event": {
+      "properties": {
+        "src": {
+          "properties": {
+            "type": {
+              "const": "access"
+            }
+          }
+        },
+        "kind": {
+          "const": "event"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "card_id",
+            "mode",
+            "result",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "card_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}$"
+            },
+            "mode": {
+              "enum": [
+                "uid",
+                "challenge"
+              ]
+            },
+            "result": {
+              "enum": [
+                "granted",
+                "denied"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "ok",
+                "unknown_card",
+                "disabled",
+                "bad_signature",
+                "pin_blocked",
+                "bad_pin",
+                "timeout",
+                "card_error"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "motion_event": {
+      "properties": {
+        "src": {
+          "properties": {
+            "type": {
+              "const": "motion"
+            }
+          }
+        },
+        "kind": {
+          "const": "event"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "active"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "active": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "status": {
+      "properties": {
+        "kind": {
+          "const": "status"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "online"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "online": {
+              "type": "boolean"
+            },
+            "fw": {
+              "type": "string"
+            },
+            "uptime_s": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "battery_mv": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "pending_records": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "zone": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "Emplacement métier du nœud (traduction faite par pollers.toml). Métadonnée : jamais dans la télémétrie."
+            },
+            "slave": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 247,
+              "description": "Adresse d'esclave Modbus du nœud."
+            },
+            "errors": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Compteur d'erreurs Modbus (timeout, CRC) depuis le démarrage du poller."
+            },
+            "config_drift": {
+              "type": "boolean",
+              "description": "Vrai si les registres de maintien relus diffèrent de la configuration attendue."
+            },
+            "serial": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295,
+              "description": "Numéro de série lu aux registres 7-8 du nœud (D32). 0 = non programmé, donc absent."
+            }
+          }
+        }
+      }
+    },
+    "alarm": {
+      "properties": {
+        "kind": {
+          "const": "alarm"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "rule",
+            "severity"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "rule": {
+              "type": "string"
+            },
+            "severity": {
+              "enum": [
+                "info",
+                "warning",
+                "critical"
+              ]
+            },
+            "value": {
+              "type": "number"
+            },
+            "threshold": {
+              "type": "number"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
