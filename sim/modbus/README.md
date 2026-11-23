@@ -120,7 +120,36 @@ l'intervalle 2 °C – 26 °C.
 > Les seuils ne sont pas mémorisés par l'Arduino : ils reviennent à 2 °C / 8 °C à
 > chaque redémarrage de la carte. Il faut les réécrire après un reset.
 
-### 4. Lire les mesures en continu
+### 4. Régler la période de mesure
+
+```bash
+mbpoll -m rtu -a 1 -b 9600 -P none -t 4 -r 1 /dev/ttyUSB0 1
+```
+
+Écrit la valeur `1` dans le **registre de maintien 0** : la période d'échantillonnage, en secondes. L'Arduino mesure alors la température **toutes les secondes** au lieu de toutes les 10 secondes (valeur par défaut).
+
+| Élément | Rôle |
+|---|---|
+| `-t 4` | Registres de maintien (les réglages) |
+| `-r 1` | Premier registre, soit l'adresse 0 : la période |
+| `1` (en fin de commande) | Nouvelle valeur, en secondes (de 1 à 3600) |
+
+### Vérification
+
+- **Lire le réglage** :
+  ```bash
+  mbpoll -m rtu -a 1 -b 9600 -P none -t 4 -r 1 -c 3 -1 /dev/ttyUSB0
+  ```
+  La valeur `[1]` doit valoir `1` (`[2]` = seuil bas, `[3]` = seuil haut).
+- **Observer l'effet** : en lecture des registres d'entrée, la séquence (`[7]`) doit avancer d'un cran à chaque seconde.
+
+### À savoir
+
+- Une valeur hors de 1 à 3600 (par exemple `0`) est refusée : l'Arduino restaure la dernière période valide.
+- La période revient à 10 s à chaque redémarrage de la carte : il faut réécrire la commande après un reset.
+- Cette commande règle la fréquence de **mesure** (côté Arduino). L'option `-l` de mbpoll règle séparément la fréquence de **lecture** (côté PC).
+
+### 5. Lire les mesures en continu
 
 ```bash
 mbpoll -m rtu -a 1 -b 9600 -P none -t 3 -r 1 -c 9 -l 2000 /dev/ttyUSB0
